@@ -1,51 +1,92 @@
 import sqlite3
 from datetime import datetime
 
-# اتصال به دیتابیس
-conn = sqlite3.connect("users.db", check_same_thread=False)
-cursor = conn.cursor()
+DB_NAME = "bot_database.db"
 
-# ساخت جدول کاربران
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY,
-    first_name TEXT,
-    last_name TEXT,
-    username TEXT,
-    language TEXT
-)
-""")
+def create_tables():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
 
-# ساخت جدول پیام‌ها
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    text TEXT,
-    timestamp TEXT,
-    FOREIGN KEY(user_id) REFERENCES users(id)
-)
-""")
+    # جدول کاربران
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER UNIQUE,
+            first_name TEXT,
+            last_name TEXT,
+            username TEXT,
+            language TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
 
-conn.commit()
+    # جدول پیام‌ها
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            message TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
 
-# ذخیره کاربر
-def save_user(user_id, first_name, last_name, username, language):
-    cursor.execute("SELECT id FROM users WHERE id = ?", (user_id,))
-    if cursor.fetchone() is None:
-        cursor.execute("""
-            INSERT INTO users (id, first_name, last_name, username, language)
-            VALUES (?, ?, ?, ?, ?)
-        """, (user_id, first_name, last_name, username, language))
-        conn.commit()
-        return True
-    return False
+    # جدول تصاویر (ذخیره base64)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            image_base64 TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
 
-# ذخیره پیام
-def save_message(user_id, text):
-    timestamp = datetime.now().isoformat()
-    cursor.execute("""
-        INSERT INTO messages (user_id, text, timestamp)
-        VALUES (?, ?, ?)
-    """, (user_id, text, timestamp))
     conn.commit()
+    conn.close()
+
+def save_user(user_id: int, first_name: str, last_name: str, username: str, language: str) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    # بررسی وجود کاربر
+    cursor.execute("SELECT id FROM users WHERE user_id = ?", (user_id,))
+    user = cursor.fetchone()
+
+    if user:
+        conn.close()
+        return False  # قبلا ذخیره شده
+
+    cursor.execute('''
+        INSERT INTO users (user_id, first_name, last_name, username, language) 
+        VALUES (?, ?, ?, ?, ?)
+    ''', (user_id, first_name, last_name, username, language))
+
+    conn.commit()
+    conn.close()
+    return True  # کاربر جدید ذخیره شد
+
+def save_message(user_id: int, message: str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO messages (user_id, message) VALUES (?, ?)
+    ''', (user_id, message))
+    conn.commit()
+    conn.close()
+
+def save_image(user_id: int, image_base64: str) -> bool:
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO images (user_id, image_base64) VALUES (?, ?)
+        ''', (user_id, image_base64))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error saving image: {e}")
+        return False
+
+
+# فقط یکبار موقع شروع برنامه اجرا کن برای ساخت جداول:
+create_tables()

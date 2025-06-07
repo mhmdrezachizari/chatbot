@@ -1,28 +1,56 @@
 import os
-from telegram import Update
+import base64
+from telegram import Update, File
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
 from openai import OpenAI
 from dotenv import load_dotenv
-from database import save_user, save_message
+from database import save_user, save_message, save_image
 
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 LIARA_API_KEY = os.getenv("LIARA_API_KEY")
 
 client = OpenAI(
-    base_url="https://ai.liara.ir/api/v1/683c9721546d7d2829e0a42d",
+    base_url="https://ai.liara.ir/api/v1/68448af297cc88f9036a08e2",
     api_key=LIARA_API_KEY,
 )
 
 async def ask_gpt(message: str) -> str:
     try:
         response = client.chat.completions.create(
-            model="openai/gpt-4o-mini",
+            model="openai/o4-mini",
             messages=[{"role": "user", "content": message}]
         )
         return response.choices[0].message.content
     except Exception as e:
         return f"❌ خطا: {str(e)}"
+
+async def ask_gpt_with_image(image_base64: str) -> str:
+    """
+    ارسال تصویر به GPT-4 Vision و دریافت پاسخ
+    """
+    try:
+        response = client.chat.completions.create(
+            model="openai/o4-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "لطفاً این تصویر را تحلیل کن."},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_base64}"
+                            }
+                        }
+                    ]
+                }
+            ]
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"❌ خطا در تحلیل تصویر: {str(e)}"
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
@@ -43,25 +71,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         message = f"""
 👋 <b>خوش برگشتی {user.first_name}!</b>
-هرچی میخواهی از  هوش مصنوعی بپرس
+هرچی میخواهی از هوش مصنوعی بپرس
 """
 
     await update.message.reply_text(message, parse_mode="HTML")
 
-
-# async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     user = update.message.from_user
-#     user_id = user.id
-#     user_message = update.message.text.strip()
-
-#     if not user_message:
-#         await update.message.reply_text("لطفاً یک پیام معتبر ارسال کنید.")
-#         return
-
-#     save_message(user_id, user_message)
-
-#     reply = await ask_gpt(user_message)
-#     await update.message.reply_text(reply)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
@@ -71,25 +85,54 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❗ لطفاً یک پیام معتبر ارسال کن.")
         return
 
-    # ذخیره در دیتابیس
     save_message(user.id, msg)
 
-    # ارسال پیام موقت
     temp_message = await update.message.reply_text("⏳ در حال دریافت پاسخ از هوش مصنوعی...")
 
     try:
-        # دریافت پاسخ از GPT
         reply = await ask_gpt(msg)
     except Exception as e:
         reply = "❌ خطا در پاسخ‌دهی: " + str(e)
 
-    # حذف پیام موقت
     try:
         await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=temp_message.message_id)
     except:
-        pass  # اگر حذف نشد مشکلی نیست
+        pass
 
-    # ارسال پاسخ نهایی
+    await update.message.reply_text(reply)
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.message.from_user
+    photo = update.message.photo[-1]  # با کیفیت‌ترین عکس
+    file: File = await context.bot.get_file(photo.file_id)
+
+    # دانلود عکس به صورت بایت
+    image_bytes = await file.download_as_bytearray()
+
+    # تبدیل به base64
+    image_base64 = base64.b64encode(image_bytes).decode()
+
+    # ذخیره عکس در دیتابیس
+    saved = save_image(user.id, image_base64)
+    if not saved:
+        await update.message.reply_text("❌ خطا در ذخیره عکس در دیتابیس.")
+        return
+
+    save_message(user.id, "[تصویر ارسال شد]")
+
+    temp_message = await update.message.reply_text("⏳ در حال تحلیل تصویر توسط هوش مصنوعی...")
+
+    try:
+        reply = await ask_gpt_with_image(image_base64)
+    except Exception as e:
+        reply = "❌ خطا در پاسخ‌دهی به تصویر: " + str(e)
+
+    try:
+        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=temp_message.message_id)
+    except:
+        pass
+
     await update.message.reply_text(reply)
 
 
@@ -97,5 +140,6 @@ if __name__ == "__main__":
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     print("✅ ربات در حال اجراست...")
     app.run_polling()
