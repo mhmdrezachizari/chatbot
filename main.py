@@ -9,21 +9,22 @@ from database import save_user, save_message, save_image
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 LIARA_API_KEY = os.getenv("LIARA_API_KEY")
+BASE_URL = os.getenv("BASE_URL")
 
 client = OpenAI(
-    base_url="https://ai.liara.ir/api/v1/68448af297cc88f9036a08e2",
+    base_url=BASE_URL,
     api_key=LIARA_API_KEY,
 )
 
 async def ask_gpt(message: str) -> str:
     try:
         response = client.chat.completions.create(
-            model="openai/o4-mini",
+            model="google/gemini-2.0-flash-001",
             messages=[{"role": "user", "content": message}]
         )
         return response.choices[0].message.content
     except Exception as e:
-        return f"❌ خطا: {str(e)}"
+        return f" خطا: {str(e)}"
 
 async def ask_gpt_with_image(image_base64: str) -> str:
     """
@@ -49,7 +50,7 @@ async def ask_gpt_with_image(image_base64: str) -> str:
         )
         return response.choices[0].message.content
     except Exception as e:
-        return f"❌ خطا در تحلیل تصویر: {str(e)}"
+        return f" خطا در تحلیل تصویر: {str(e)}"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -64,9 +65,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if new_user:
         message = f"""
-🎉 <b>خوش آمدی {user.first_name} عزیز!</b>
+ <b>خوش آمدی {user.first_name} عزیز!</b>
 
-🧠 تو اولین باره که با ربات صحبت می‌کنی، اطلاعاتت ذخیره شد ✅
+ تو اولین باره که با ربات صحبت می‌کنی، اطلاعاتت ذخیره شد 
 """
     else:
         message = f"""
@@ -82,7 +83,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message.text.strip()
 
     if not msg:
-        await update.message.reply_text("❗ لطفاً یک پیام معتبر ارسال کن.")
+        await update.message.reply_text(" لطفاً یک پیام معتبر ارسال کن.")
         return
 
     save_message(user.id, msg)
@@ -92,7 +93,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         reply = await ask_gpt(msg)
     except Exception as e:
-        reply = "❌ خطا در پاسخ‌دهی: " + str(e)
+        reply = " خطا در پاسخ‌دهی: " + str(e)
 
     try:
         await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=temp_message.message_id)
@@ -104,19 +105,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    photo = update.message.photo[-1]  # با کیفیت‌ترین عکس
+    photo = update.message.photo[-1] 
     file: File = await context.bot.get_file(photo.file_id)
 
-    # دانلود عکس به صورت بایت
     image_bytes = await file.download_as_bytearray()
 
-    # تبدیل به base64
     image_base64 = base64.b64encode(image_bytes).decode()
 
-    # ذخیره عکس در دیتابیس
     saved = save_image(user.id, image_base64)
     if not saved:
-        await update.message.reply_text("❌ خطا در ذخیره عکس در دیتابیس.")
+        await update.message.reply_text(" خطا در ذخیره عکس در دیتابیس.")
         return
 
     save_message(user.id, "[تصویر ارسال شد]")
@@ -126,7 +124,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         reply = await ask_gpt_with_image(image_base64)
     except Exception as e:
-        reply = "❌ خطا در پاسخ‌دهی به تصویر: " + str(e)
+        reply = " خطا در پاسخ‌دهی به تصویر: " + str(e)
 
     try:
         await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=temp_message.message_id)
@@ -141,5 +139,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    print("✅ ربات در حال اجراست...")
+    print(" ربات در حال اجراست...")
     app.run_polling()
